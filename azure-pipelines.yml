@@ -17,43 +17,15 @@ variables:
 
 stages:
   # ==========================================
-  # STAGE 1: SECURITY SCAN & VALIDATION
+  # STAGE 1: INIT, SECURITY SCAN & VALIDATE
   # ==========================================
-  - stage: Security_And_Validation
-    displayName: '1. Security Scan & Validation'
+  - stage: Init_And_Security
+    displayName: '1. Init & Security Scan'
     jobs:
-      - job: Lint_And_Security
-        displayName: 'TFLint, TFSec, Checkov & Validate'
+      - job: Init_And_Scan_Job
+        displayName: 'Init, Security Scans & Validate'
         steps:
-          # 1. TFLint (Warnings par fail nahi hoga)
-          - powershell: |
-              Write-Host "===> Running TFLint..."
-              tflint --init
-              tflint --minimum-failure-severity=error
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Warning "TFLint found issues, but continuing..."
-              }
-              exit 0
-            displayName: 'Run TFLint'
-            workingDirectory: $(workingDirectory)
-
-          # 2. TFSec Scan
-          - powershell: |
-              Write-Host "===> Running TFSec..."
-              tfsec .
-              exit 0
-            displayName: 'Run TFSec'
-            workingDirectory: $(workingDirectory)
-
-          # 3. Checkov Scan (Soft-fail ke sath)
-          - powershell: |
-              Write-Host "===> Running Checkov..."
-              checkov -d . --framework terraform --soft-fail
-              exit 0
-            displayName: 'Run Checkov Scan'
-            workingDirectory: $(workingDirectory)
-
-          # 4. Terraform Init
+          # STEP 1: Sabse Pehle Terraform Init chalega
           - task: TerraformTask@5
             displayName: 'Terraform : Init'
             inputs:
@@ -66,7 +38,32 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # 5. Terraform Validate
+          # STEP 2: TFLint Scan
+          - powershell: |
+              Write-Host "===> Running TFLint..."
+              tflint --init
+              tflint --minimum-failure-severity=error
+              exit 0
+            displayName: 'Run TFLint'
+            workingDirectory: $(workingDirectory)
+
+          # STEP 3: TFSec Scan
+          - powershell: |
+              Write-Host "===> Running TFSec..."
+              tfsec .
+              exit 0
+            displayName: 'Run TFSec'
+            workingDirectory: $(workingDirectory)
+
+          # STEP 4: Checkov Scan
+          - powershell: |
+              Write-Host "===> Running Checkov..."
+              checkov -d . --framework terraform --soft-fail
+              exit 0
+            displayName: 'Run Checkov Scan'
+            workingDirectory: $(workingDirectory)
+
+          # STEP 5: Terraform Validate
           - task: TerraformTask@5
             displayName: 'Terraform : Validate'
             inputs:
@@ -79,8 +76,8 @@ stages:
   # ==========================================
   - stage: Terraform_Plan
     displayName: '2. Terraform Plan'
-    dependsOn: Security_And_Validation
-    condition: succeeded('Security_And_Validation')
+    dependsOn: Init_And_Security
+    condition: succeeded('Init_And_Security')
     jobs:
       - job: Plan_Job
         displayName: 'Terraform Plan'
@@ -98,7 +95,7 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # Terraform Plan (tfplan file generate karega)
+          # Terraform Plan (Generates tfplan file)
           - task: TerraformTask@5
             displayName: 'Terraform : Plan'
             inputs:
@@ -108,7 +105,7 @@ stages:
               environmentServiceNameAzureRM: $(serviceConnection)
               commandOptions: '-out=$(Build.ArtifactStagingDirectory)/tfplan'
 
-          # Save Plan as Pipeline Artifact
+          # Publish Plan as Artifact
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Plan Artifact'
             inputs:
@@ -150,7 +147,7 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # Terraform Apply
+          # Terraform Apply using the Plan File
           - task: TerraformTask@5
             displayName: 'Terraform : Apply'
             inputs:
