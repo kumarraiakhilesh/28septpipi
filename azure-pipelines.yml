@@ -1,3 +1,5 @@
+
+
 trigger:
   branches:
     include:
@@ -160,14 +162,12 @@ stages:
               PathtoPublish: '$(workingDirectory)/tfplan'
               ArtifactName: 'terraform-plan'
               publishLocation: 'Container'
-
-  # ==========================================
-  # STAGE 4: TERRAFORM APPLY
+# STAGE 4: TERRAFORM APPLY
   # ==========================================
   - stage: Terraform_Apply
     displayName: '4. Terraform Apply'
     dependsOn: Terraform_Plan
-    condition: and(succeeded('Terraform_Plan'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    condition: succeeded('Terraform_Plan')     # <--- Bas yeh line update karein
     jobs:
       - deployment: Apply_Job
         displayName: 'Terraform Apply'
@@ -176,7 +176,7 @@ stages:
           runOnce:
             deploy:
               steps:
-                # Download Saved Plan
+                # 1. Download Plan
                 - task: DownloadBuildArtifacts@0
                   displayName: 'Download Plan Artifact'
                   inputs:
@@ -184,8 +184,7 @@ stages:
                     downloadType: 'single'
                     artifactName: 'terraform-plan'
                     downloadPath: '$(workingDirectory)'
-
-                # Terraform Init
+                # 2. Init
                 - task: TerraformTask@5
                   displayName: 'Terraform : Init'
                   inputs:
@@ -197,8 +196,7 @@ stages:
                     backendAzureRmStorageAccountName: $(storageAccount)
                     backendAzureRmContainerName: $(containerName)
                     backendAzureRmKey: $(tfstateKey)
-
-                # Terraform Apply
+                # 3. Apply
                 - task: TerraformTask@5
                   displayName: 'Terraform : Apply'
                   inputs:
