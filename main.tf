@@ -5,7 +5,7 @@ module "rg" {
 
 module "storage" {
 
-  source           = "./Module/storage"
+  source           = "./Module/Storage"
   storage_accounts = var.storage_accounts
 
   depends_on = [module.rg]
