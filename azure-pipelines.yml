@@ -1,0 +1,164 @@
+trigger:
+  branches:
+    include:
+      - main
+      - features/*
+
+pool:
+  name: septakhilesh
+
+variables:
+  # Agar aapka code root me hai toh '.', agar Dev folder me hai toh 'Dev' likhein
+  workingDirectory: '$(System.DefaultWorkingDirectory)'
+  serviceConnection: 'sept28service'
+  resourceGroup: 'akhileshtestpip'
+  storageAccount: 'akhileshstoragepipi2'
+  containerName: 'akhileshcanttest'
+  tfstateKey: 'pipe.tfstate'
+
+stages:
+  # ==========================================
+  # STAGE 1: SECURITY SCAN & VALIDATION
+  # ==========================================
+  - stage: Security_And_Validation
+    displayName: '1. Security Scan & Validation'
+    jobs:
+      - job: Lint_And_Security
+        displayName: 'TFLint, TFSec, Checkov & Validate'
+        steps:
+          # 1. TFLint Scan
+          - powershell: |
+              Write-Host "Running TFLint..."
+              # Agar tflint install nahi hai toh uncomment karein: choco install tflint -y
+              tflint --version
+              tflint --init
+              tflint
+            displayName: 'Run TFLint'
+            workingDirectory: $(workingDirectory)
+            continueOnError: true # Pipeline block na ho minor warnings par
+
+          # 2. TFSec Scan
+          - powershell: |
+              Write-Host "Running TFSec..."
+              # Agar tfsec install nahi hai toh uncomment karein: choco install tfsec -y
+              tfsec .
+            displayName: 'Run TFSec'
+            workingDirectory: $(workingDirectory)
+            continueOnError: true
+
+          # 3. Checkov Scan
+          - powershell: |
+              Write-Host "Running Checkov..."
+              # Agar checkov install nahi hai: pip install checkov
+              checkov -d . --framework terraform
+            displayName: 'Run Checkov Scan'
+            workingDirectory: $(workingDirectory)
+            continueOnError: true
+
+          # 4. Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
+
+          # 5. Terraform Validate
+          - task: TerraformTask@5
+            displayName: 'Terraform : Validate'
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+              workingDirectory: $(workingDirectory)
+
+  # ==========================================
+  # STAGE 2: TERRAFORM PLAN
+  # ==========================================
+  - stage: Terraform_Plan
+    displayName: '2. Terraform Plan'
+    dependsOn: Security_And_Validation
+    condition: succeeded('Security_And_Validation')
+    jobs:
+      - job: Plan_Job
+        displayName: 'Terraform Plan'
+        steps:
+          # Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
+
+          # Terraform Plan
+          - task: TerraformTask@5
+            displayName: 'Terraform : Plan'
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '-out=$(Build.ArtifactStagingDirectory)/tfplan'
+
+          # Save Plan as Artifact
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Plan Artifact'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/tfplan'
+              ArtifactName: 'terraform-plan'
+              publishLocation: 'Container'
+
+  # ==========================================
+  # STAGE 3: TERRAFORM APPLY
+  # ==========================================
+  - stage: Terraform_Apply
+    displayName: '3. Terraform Apply'
+    dependsOn: Terraform_Plan
+    # CONDITION: Plan Stage pass hona chahiye AND branch 'main' honi chahiye
+    condition: and(succeeded('Terraform_Plan'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: Apply_Job
+        displayName: 'Terraform Apply'
+        steps:
+          # Download the Saved Plan
+          - task: DownloadBuildArtifacts@0
+            displayName: 'Download Plan Artifact'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'terraform-plan'
+              downloadPath: '$(workingDirectory)'
+
+          # Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
+
+          # Terraform Apply using the Plan File
+          - task: TerraformTask@5
+            displayName: 'Terraform : Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '$(workingDirectory)/terraform-plan/tfplan'
+   
