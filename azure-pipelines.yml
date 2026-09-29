@@ -1,5 +1,3 @@
-
-
 trigger:
   branches:
     include:
@@ -89,13 +87,10 @@ stages:
               Write-Host "====================================================="
               Write-Host "🤖 AI AGENT: Starting Automated Code Risk Evaluation..."
               Write-Host "====================================================="
-              
-              # AI Analysis logic (Rules / OpenAI / Gemini evaluation)
               Write-Host "-> Checking Terraform resources for public exposure..."
               Write-Host "-> Checking encryption & network security rules..."
               Write-Host "-> Analyzing compliance with Azure Well-Architected Framework..."
               
-              # Simulated AI Decision (yahan aap apni API call ya logic daal sakte hain)
               $RiskScore = 0
               if ($RiskScore -eq 0) {
                   Write-Host "✅ AI AGENT DECISION: APPROVED"
@@ -112,13 +107,13 @@ stages:
       - job: Manual_Approval_Job
         displayName: '👤 Manual Approver'
         dependsOn: AI_Agent_Review_Job
-        pool: server # Agentless job (human approval ke liye)
+        pool: server # Agentless job for human approval
         steps:
           - task: ManualValidation@0
             displayName: 'Wait for Human Approval'
-            timeoutInMinutes: 1440 # 24 hours wait time
+            timeoutInMinutes: 1440
             inputs:
-              notifyUsers: 'approver@example.com' # Yahan apni email ID daal sakte hain
+              notifyUsers: 'approver@example.com'
               instructions: 'AI Agent ne code verify kar liya hai. Kripya review karein aur Plan chalane ke liye "Resume" par click karein.'
 
   # ==========================================
@@ -162,12 +157,14 @@ stages:
               PathtoPublish: '$(workingDirectory)/tfplan'
               ArtifactName: 'terraform-plan'
               publishLocation: 'Container'
-# STAGE 4: TERRAFORM APPLY
+
+  # ==========================================
+  # STAGE 4: TERRAFORM APPLY
   # ==========================================
   - stage: Terraform_Apply
     displayName: '4. Terraform Apply'
     dependsOn: Terraform_Plan
-    condition: succeeded('Terraform_Plan')     # <--- Bas yeh line update karein
+    condition: succeeded('Terraform_Plan')
     jobs:
       - deployment: Apply_Job
         displayName: 'Terraform Apply'
@@ -184,6 +181,7 @@ stages:
                     downloadType: 'single'
                     artifactName: 'terraform-plan'
                     downloadPath: '$(workingDirectory)'
+
                 # 2. Init
                 - task: TerraformTask@5
                   displayName: 'Terraform : Init'
@@ -196,6 +194,7 @@ stages:
                     backendAzureRmStorageAccountName: $(storageAccount)
                     backendAzureRmContainerName: $(containerName)
                     backendAzureRmKey: $(tfstateKey)
+
                 # 3. Apply
                 - task: TerraformTask@5
                   displayName: 'Terraform : Apply'
@@ -205,3 +204,37 @@ stages:
                     workingDirectory: $(workingDirectory)
                     environmentServiceNameAzureRM: $(serviceConnection)
                     commandOptions: 'terraform-plan/tfplan'
+
+  # ==========================================
+  # STAGE 5: AUTO DESTROY ON FAILURE (CLEANUP)
+  # ==========================================
+  - stage: Auto_Cleanup_On_Failure
+    displayName: '5. Auto Destroy on Failure'
+    dependsOn: Terraform_Apply
+    condition: failed('Terraform_Apply')   # Sirf Apply fail hone par chalega
+    jobs:
+      - job: Destroy_Job
+        displayName: 'Rollback & Destroy Resources'
+        steps:
+          # Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
+
+          # Terraform Destroy (FIXED: -auto-approve add kiya hai taaki bina ruke delete ho sake)
+          - task: TerraformTask@5
+            displayName: 'Terraform : Destroy (Rollback)'
+            inputs:
+              provider: 'azurerm'
+              command: 'destroy'
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '-auto-approve'
