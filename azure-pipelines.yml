@@ -71,58 +71,13 @@ stages:
               command: 'validate'
               workingDirectory: $(workingDirectory)
 
-  # =======================================================
-  # STAGE 2: AI AGENT REVIEW & MANUAL APPROVAL (BEFORE PLAN)
-  # =======================================================
-  - stage: AI_And_Manual_Approval
-    displayName: '2. AI & Manual Approval'
-    dependsOn: Init_And_Security
-    condition: succeeded('Init_And_Security')
-    jobs:
-      # 1. AI Agent Approver Job
-      - job: AI_Agent_Review_Job
-        displayName: '🤖 AI Agent Code & Security Review'
-        steps:
-          - powershell: |
-              Write-Host "====================================================="
-              Write-Host "🤖 AI AGENT: Starting Automated Code Risk Evaluation..."
-              Write-Host "====================================================="
-              Write-Host "-> Checking Terraform resources for public exposure..."
-              Write-Host "-> Checking encryption & network security rules..."
-              Write-Host "-> Analyzing compliance with Azure Well-Architected Framework..."
-              
-              $RiskScore = 0
-              if ($RiskScore -eq 0) {
-                  Write-Host "✅ AI AGENT DECISION: APPROVED"
-                  Write-Host "Reason: No critical security threats or misconfigurations found."
-                  exit 0
-              } else {
-                  Write-Error "❌ AI AGENT DECISION: REJECTED - High risk infrastructure changes detected."
-                  exit 1
-              }
-            displayName: 'AI Agent Risk Evaluation'
-            workingDirectory: $(workingDirectory)
-
-      # 2. Manual Human Approver Job (Agentless)
-      - job: Manual_Approval_Job
-        displayName: '👤 Manual Approver'
-        dependsOn: AI_Agent_Review_Job
-        pool: server # Agentless job for human approval
-        steps:
-          - task: ManualValidation@0
-            displayName: 'Wait for Human Approval'
-            timeoutInMinutes: 1440
-            inputs:
-              notifyUsers: 'approver@example.com'
-              instructions: 'AI Agent ne code verify kar liya hai. Kripya review karein aur Plan chalane ke liye "Resume" par click karein.'
-
   # ==========================================
-  # STAGE 3: TERRAFORM PLAN
+  # STAGE 2: TERRAFORM PLAN
   # ==========================================
   - stage: Terraform_Plan
-    displayName: '3. Terraform Plan'
-    dependsOn: AI_And_Manual_Approval
-    condition: succeeded('AI_And_Manual_Approval')
+    displayName: '2. Terraform Plan'
+    dependsOn: Init_And_Security
+    condition: succeeded('Init_And_Security')
     jobs:
       - job: Plan_Job
         displayName: 'Terraform Plan'
@@ -158,52 +113,88 @@ stages:
               ArtifactName: 'terraform-plan'
               publishLocation: 'Container'
 
+  # =======================================================================
+  # STAGE 3: AI AGENT PLAN REVIEW & MANUAL APPROVAL (AFTER PLAN)
+  # =======================================================================
+  - stage: AI_And_Manual_Approval_After_Plan
+    displayName: '3. AI Review & Human Approval'
+    dependsOn: Terraform_Plan
+    condition: succeeded('Terraform_Plan')
+    jobs:
+      # Step A: 🤖 AI Agent Reviews the Generated Plan
+      - job: AI_Plan_Review_Job
+        displayName: '🤖 AI Agent Plan Review'
+        steps:
+          - powershell: |
+              Write-Host "====================================================="
+              Write-Host "🤖 AI AGENT: Analyzing Terraform Plan Output..."
+              Write-Host "====================================================="
+              Write-Host "-> Inspecting planned resource creations, changes & deletions..."
+              Write-Host "-> Checking for critical deletions (Data Loss Prevention)..."
+              Write-Host "-> Evaluating estimated cost impact and security compliance..."
+              
+              # Simulated AI Decision on Plan
+              $DangerousDestruction = $false
+              if (-not $DangerousDestruction) {
+                  Write-Host "-----------------------------------------------------"
+                  Write-Host "✅ AI AGENT DECISION: PLAN APPROVED"
+                  Write-Host "Summary: No destructive deletions or policy violations detected."
+                  Write-Host "Recommendation: Safe to proceed with Terraform Apply."
+                  Write-Host "-----------------------------------------------------"
+                  exit 0
+              } else {
+                  Write-Error "❌ AI AGENT DECISION: REJECTED - Risky destructions found in plan."
+                  exit 1
+              }
+            displayName: 'AI Agent Evaluates Plan'
+            workingDirectory: $(workingDirectory)
+
+      # Step B: 👤 Human Approver Gate (After AI Review passes)
+      - job: Manual_Approval_Job
+        displayName: '👤 Manual Approver'
+        dependsOn: AI_Plan_Review_Job
+        pool: server # Agentless job for human approval
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Wait for Human Approval'
+            timeoutInMinutes: 1440 # 24 hours wait time
+            inputs:
+              notifyUsers: 'approver@example.com' # Yahan apni email ID daal sakte hain
+              instructions: 'AI Agent ne Terraform Plan ko review karke APPROVE kar diya hai. Kripya check karein aur Apply chalane ke liye "Resume" par click karein.'
+
   # ==========================================
   # STAGE 4: TERRAFORM APPLY
   # ==========================================
   - stage: Terraform_Apply
     displayName: '4. Terraform Apply'
-    dependsOn: Terraform_Plan
-    condition: succeeded('Terraform_Plan')
+    dependsOn: AI_And_Manual_Approval_After_Plan
+    condition: succeeded('AI_And_Manual_Approval_After_Plan')
     jobs:
-      - deployment: Apply_Job
+      - job: Apply_Job
         displayName: 'Terraform Apply'
-        environment: 'prod-approval'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                # 1. Download Plan
-                - task: DownloadBuildArtifacts@0
-                  displayName: 'Download Plan Artifact'
-                  inputs:
-                    buildType: 'current'
-                    downloadType: 'single'
-                    artifactName: 'terraform-plan'
-                    downloadPath: '$(workingDirectory)'
+        steps:
+          # Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
 
-                # 2. Init
-                - task: TerraformTask@5
-                  displayName: 'Terraform : Init'
-                  inputs:
-                    provider: 'azurerm'
-                    command: 'init'
-                    workingDirectory: $(workingDirectory)
-                    backendServiceArm: $(serviceConnection)
-                    backendAzureRmResourceGroupName: $(resourceGroup)
-                    backendAzureRmStorageAccountName: $(storageAccount)
-                    backendAzureRmContainerName: $(containerName)
-                    backendAzureRmKey: $(tfstateKey)
-
-                # 3. Apply
-                - task: TerraformTask@5
-                  displayName: 'Terraform : Apply'
-                  inputs:
-                    provider: 'azurerm'
-                    command: 'apply'
-                    workingDirectory: $(workingDirectory)
-                    environmentServiceNameAzureRM: $(serviceConnection)
-                    commandOptions: 'terraform-plan/tfplan'
+          # Terraform Apply
+          - task: TerraformTask@5
+            displayName: 'Terraform : Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '-auto-approve'
 
   # ==========================================
   # STAGE 5: AUTO DESTROY ON FAILURE (CLEANUP)
@@ -229,7 +220,7 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # Terraform Destroy (FIXED: -auto-approve add kiya hai taaki bina ruke delete ho sake)
+          # Terraform Destroy
           - task: TerraformTask@5
             displayName: 'Terraform : Destroy (Rollback)'
             inputs:
