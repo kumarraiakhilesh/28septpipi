@@ -23,3 +23,17 @@ resource "azurerm_key_vault" "kv" {
     ])
   }
 }
+
+resource "random_password" "vm_password" {
+  length           = 16
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "azurerm_key_vault_secret" "vm_password" {
+  for_each     = azurerm_key_vault.kv
+  name         = "admin-password"
+  value        = random_password.vm_password.result
+  key_vault_id = each.value.id
+  depends_on   = [azurerm_key_vault.kv]
+}

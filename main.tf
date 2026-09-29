@@ -37,9 +37,10 @@ module "nic" {
   nic        = var.nic
 }
 module "virtual_machine" {
-  depends_on      = [module.nic]
+  depends_on      = [module.nic, module.key_vault]
   source          = "./Module/VM"
   virtual_machine = var.virtual_machine
+  admin_password  = module.key_vault.admin_password
 }
 
 module "nsg" {

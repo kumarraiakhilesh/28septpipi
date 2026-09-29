@@ -1,14 +1,4 @@
 
-data "azurerm_key_vault" "kv" {
-  name                = "akhilesh-kv-dev"
-  resource_group_name = "akhilesh_RG_dev"
-}
-
-data "azurerm_key_vault_secret" "vm_password" {
-  name         = "admin-password"
-  key_vault_id = data.azurerm_key_vault.kv.id
-}
-
 # 🔹 Data NIC (if single VM only)
 data "azurerm_network_interface" "akhilesh_data" {
   for_each            = var.virtual_machine
@@ -32,7 +22,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
   ]
 
   admin_username = "testadmin"
-  admin_password = data.azurerm_key_vault_secret.vm_password.value
+  admin_password = var.admin_password
 
   disable_password_authentication = false
 
