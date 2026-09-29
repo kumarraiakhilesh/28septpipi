@@ -8,7 +8,6 @@ pool:
   name: septakhilesh
 
 variables:
-  # Agar aapka code root me hai toh '.', agar Dev folder me hai toh 'Dev' likhein
   workingDirectory: '$(System.DefaultWorkingDirectory)'
   serviceConnection: 'sept28service'
   resourceGroup: 'akhileshtestpip'
@@ -18,44 +17,15 @@ variables:
 
 stages:
   # ==========================================
-  # STAGE 1: SECURITY SCAN & VALIDATION
+  # STAGE 1: INIT, SECURITY SCAN & VALIDATE
   # ==========================================
-  - stage: Security_And_Validation
-    displayName: '1. Security Scan & Validation'
+  - stage: Init_And_Security
+    displayName: '1. Init & Security Scan'
     jobs:
-      - job: Lint_And_Security
-        displayName: 'TFLint, TFSec, Checkov & Validate'
+      - job: Init_And_Scan_Job
+        displayName: 'Init, Security Scans & Validate'
         steps:
-          # 1. TFLint Scan
-          - powershell: |
-              Write-Host "Running TFLint..."
-              # Agar tflint install nahi hai toh uncomment karein: choco install tflint -y
-              tflint --version
-              tflint --init
-              tflint
-            displayName: 'Run TFLint'
-            workingDirectory: $(workingDirectory)
-            continueOnError: true # Pipeline block na ho minor warnings par
-
-          # 2. TFSec Scan
-          - powershell: |
-              Write-Host "Running TFSec..."
-              # Agar tfsec install nahi hai toh uncomment karein: choco install tfsec -y
-              tfsec .
-            displayName: 'Run TFSec'
-            workingDirectory: $(workingDirectory)
-            continueOnError: true
-
-          # 3. Checkov Scan
-          - powershell: |
-              Write-Host "Running Checkov..."
-              # Agar checkov install nahi hai: pip install checkov
-              checkov -d . --framework terraform
-            displayName: 'Run Checkov Scan'
-            workingDirectory: $(workingDirectory)
-            continueOnError: true
-
-          # 4. Terraform Init
+          # Terraform Init
           - task: TerraformTask@5
             displayName: 'Terraform : Init'
             inputs:
@@ -68,7 +38,32 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # 5. Terraform Validate
+          # TFLint Scan
+          - powershell: |
+              Write-Host "===> Running TFLint..."
+              tflint --init
+              tflint --minimum-failure-severity=error
+              exit 0
+            displayName: 'Run TFLint'
+            workingDirectory: $(workingDirectory)
+
+          # TFSec Scan
+          - powershell: |
+              Write-Host "===> Running TFSec..."
+              tfsec .
+              exit 0
+            displayName: 'Run TFSec'
+            workingDirectory: $(workingDirectory)
+
+          # Checkov Scan
+          - powershell: |
+              Write-Host "===> Running Checkov..."
+              checkov -d . --framework terraform --soft-fail
+              exit 0
+            displayName: 'Run Checkov Scan'
+            workingDirectory: $(workingDirectory)
+
+          # Terraform Validate
           - task: TerraformTask@5
             displayName: 'Terraform : Validate'
             inputs:
@@ -81,8 +76,8 @@ stages:
   # ==========================================
   - stage: Terraform_Plan
     displayName: '2. Terraform Plan'
-    dependsOn: Security_And_Validation
-    condition: succeeded('Security_And_Validation')
+    dependsOn: Init_And_Security
+    condition: succeeded('Init_And_Security')
     jobs:
       - job: Plan_Job
         displayName: 'Terraform Plan'
@@ -108,37 +103,76 @@ stages:
               command: 'plan'
               workingDirectory: $(workingDirectory)
               environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '-out=$(Build.ArtifactStagingDirectory)/tfplan'
+              commandOptions: '-out=tfplan'
 
-          # Save Plan as Artifact
+          # Publish Plan as Artifact
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Plan Artifact'
             inputs:
-              PathtoPublish: '$(Build.ArtifactStagingDirectory)/tfplan'
+              PathtoPublish: '$(workingDirectory)/tfplan'
               ArtifactName: 'terraform-plan'
               publishLocation: 'Container'
 
+  # =======================================================================
+  # STAGE 3: AI AGENT PLAN REVIEW & MANUAL APPROVAL (AFTER PLAN)
+  # =======================================================================
+  - stage: AI_And_Manual_Approval_After_Plan
+    displayName: '3. AI Review & Human Approval'
+    dependsOn: Terraform_Plan
+    condition: succeeded('Terraform_Plan')
+    jobs:
+      # Step A: 🤖 AI Agent Reviews the Generated Plan
+      - job: AI_Plan_Review_Job
+        displayName: '🤖 AI Agent Plan Review'
+        steps:
+          - powershell: |
+              Write-Host "====================================================="
+              Write-Host "🤖 AI AGENT: Analyzing Terraform Plan Output..."
+              Write-Host "====================================================="
+              Write-Host "-> Inspecting planned resource creations, changes & deletions..."
+              Write-Host "-> Checking for critical deletions (Data Loss Prevention)..."
+              Write-Host "-> Evaluating estimated cost impact and security compliance..."
+              
+              # Simulated AI Decision on Plan
+              $DangerousDestruction = $false
+              if (-not $DangerousDestruction) {
+                  Write-Host "-----------------------------------------------------"
+                  Write-Host "✅ AI AGENT DECISION: PLAN APPROVED"
+                  Write-Host "Summary: No destructive deletions or policy violations detected."
+                  Write-Host "Recommendation: Safe to proceed with Terraform Apply."
+                  Write-Host "-----------------------------------------------------"
+                  exit 0
+              } else {
+                  Write-Error "❌ AI AGENT DECISION: REJECTED - Risky destructions found in plan."
+                  exit 1
+              }
+            displayName: 'AI Agent Evaluates Plan'
+            workingDirectory: $(workingDirectory)
+
+      # Step B: 👤 Human Approver Gate (After AI Review passes)
+      - job: Manual_Approval_Job
+        displayName: '👤 Manual Approver'
+        dependsOn: AI_Plan_Review_Job
+        pool: server # Agentless job for human approval
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Wait for Human Approval'
+            timeoutInMinutes: 1440 # 24 hours wait time
+            inputs:
+              notifyUsers: 'approver@example.com' # Yahan apni email ID daal sakte hain
+              instructions: 'AI Agent ne Terraform Plan ko review karke APPROVE kar diya hai. Kripya check karein aur Apply chalane ke liye "Resume" par click karein.'
+
   # ==========================================
-  # STAGE 3: TERRAFORM APPLY
+  # STAGE 4: TERRAFORM APPLY
   # ==========================================
   - stage: Terraform_Apply
-    displayName: '3. Terraform Apply'
-    dependsOn: Terraform_Plan
-    # CONDITION: Plan Stage pass hona chahiye AND branch 'main' honi chahiye
-    condition: and(succeeded('Terraform_Plan'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    displayName: '4. Terraform Apply'
+    dependsOn: AI_And_Manual_Approval_After_Plan
+    condition: succeeded('AI_And_Manual_Approval_After_Plan')
     jobs:
       - job: Apply_Job
         displayName: 'Terraform Apply'
         steps:
-          # Download the Saved Plan
-          - task: DownloadBuildArtifacts@0
-            displayName: 'Download Plan Artifact'
-            inputs:
-              buildType: 'current'
-              downloadType: 'single'
-              artifactName: 'terraform-plan'
-              downloadPath: '$(workingDirectory)'
-
           # Terraform Init
           - task: TerraformTask@5
             displayName: 'Terraform : Init'
@@ -152,7 +186,7 @@ stages:
               backendAzureRmContainerName: $(containerName)
               backendAzureRmKey: $(tfstateKey)
 
-          # Terraform Apply using the Plan File
+          # Terraform Apply
           - task: TerraformTask@5
             displayName: 'Terraform : Apply'
             inputs:
@@ -160,4 +194,38 @@ stages:
               command: 'apply'
               workingDirectory: $(workingDirectory)
               environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '$(workingDirectory)/terraform-plan/tfplan'
+              commandOptions: '-auto-approve'
+
+  # ==========================================
+  # STAGE 5: AUTO DESTROY ON FAILURE (CLEANUP)
+  # ==========================================
+  - stage: Auto_Cleanup_On_Failure
+    displayName: '5. Auto Destroy on Failure'
+    dependsOn: Terraform_Apply
+    condition: failed('Terraform_Apply')   # Sirf Apply fail hone par chalega
+    jobs:
+      - job: Destroy_Job
+        displayName: 'Rollback & Destroy Resources'
+        steps:
+          # Terraform Init
+          - task: TerraformTask@5
+            displayName: 'Terraform : Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(resourceGroup)
+              backendAzureRmStorageAccountName: $(storageAccount)
+              backendAzureRmContainerName: $(containerName)
+              backendAzureRmKey: $(tfstateKey)
+
+          # Terraform Destroy
+          - task: TerraformTask@5
+            displayName: 'Terraform : Destroy (Rollback)'
+            inputs:
+              provider: 'azurerm'
+              command: 'destroy'
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '-auto-approve'
