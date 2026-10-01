@@ -77,7 +77,7 @@ virtual_machine = {
     name                = "akhilesh_vm_dev"
     location            = "japan east"
     resource_group_name = "akhilesh_RG_dev"
-    vm_size             = "Standard_B2ms"
+    vm_size             = "Standard_D2s_v3"
     nic_name            = "akhilesh_nic_dev"
   }
 }
