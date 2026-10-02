@@ -6,7 +6,7 @@ resource_groups = {
 }
 storage_accounts = {
   St1 = {
-    name                = "akhileshstorage1dev"
+    name                = "akhileshstorage1dev01"
     location            = "Central India"
     account_tier        = "Standard"
     replication_type    = "LRS"
@@ -17,7 +17,7 @@ storage_containers = {
   st1 = {
     name                  = "akhileshcontainer1dev"
     container_access_type = "private"
-    storage_account_name  = "akhileshstorage1dev"
+    storage_account_name  = "akhileshstorage1dev01"
     resource_group_name   = "akhilesh_RG_dev"
   }
 }
@@ -112,7 +112,7 @@ app_gateway = {
 }
 key_vaults = {
   kv1 = {
-    name                = "akhilesh-kv-dev"
+    name                = "akhilesh-kv-dev-01"
     location            = "Central India"
     resource_group_name = "akhilesh_RG_dev"
     sku_name            = "standard"
