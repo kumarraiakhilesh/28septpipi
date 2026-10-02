@@ -1,13 +1,13 @@
 resource_groups = {
   rg1 = {
     name     = "akhilesh_RG_dev"
-    location = "japaan east"
+    location = " japaneast"
   }
 }
 storage_accounts = {
   St1 = {
     name                = "akhileshstorage1dev01"
-    location            = "japaan east"
+    location            = " japaneast"
     account_tier        = "Standard"
     replication_type    = "LRS"
     resource_group_name = "akhilesh_RG_dev"
@@ -24,7 +24,7 @@ storage_containers = {
 virtual_networks = {
   Vnet1 = {
     name                = "akhilesh_vnet_dev"
-    location            = "japaan east"
+    location            = " japaneast"
     resource_group_name = "akhilesh_RG_dev"
     address_space       = ["10.0.0.0/16"]
 
@@ -62,7 +62,7 @@ public_ip = {
   public_ip1 = {
     name                = "acceptanceTestPublicIp1_dev"
     resource_group_name = "akhilesh_RG_dev"
-    location            = "japaan east"
+    location            = " japaneast"
     allocation_method   = "Static"
   }
 }
@@ -70,7 +70,7 @@ nic = {
   nic1 = {
     name                 = "akhilesh_nic_dev"
     resource_group_name  = "akhilesh_RG_dev"
-    location             = "japaan east"
+    location             = " japaneast"
     virtual_network_name = "akhilesh_vnet_dev"
     subnet_name          = "akhilesh_frontend_subnet_dev"
   }
@@ -78,7 +78,7 @@ nic = {
 virtual_machine = {
   vm1 = {
     name                = "akhilesh_vm_dev"
-    location            = "japaan east"
+    location            = " japaneast"
     resource_group_name = "akhilesh_RG_dev"
     vm_size             = "Standard_D2s_v3"
     nic_name            = "akhilesh_nic_dev"
@@ -87,7 +87,7 @@ virtual_machine = {
 nsg = {
   nsg1 = {
     name                = "akhilesh-nsg-dev"
-    location            = "japaan east"
+    location            = " japaneast"
     resource_group_name = "akhilesh_RG_dev"
     nic_name            = "akhilesh_nic_dev"
   }
@@ -95,7 +95,7 @@ nsg = {
 bastion = {
   bastion1 = {
     name                 = "akhilesh-bastion-dev"
-    location             = "japaan east"
+    location             = " japaneast"
     resource_group_name  = "akhilesh_RG_dev"
     public_ip_name       = "bastion-pip-dev"
     virtual_network_name = "akhilesh_vnet_dev"
@@ -105,7 +105,7 @@ bastion = {
 app_gateway = {
   appgw1 = {
     name                 = "akhilesh-appgateway-dev"
-    location             = "japaan east"
+    location             = " japaneast"
     resource_group_name  = "akhilesh_RG_dev"
     public_ip_name       = "appgw-pip-dev"
     virtual_network_name = "akhilesh_vnet_dev"
@@ -116,7 +116,7 @@ app_gateway = {
 key_vaults = {
   kv1 = {
     name                = "akhilesh-kv-dev-01"
-    location            = "japaan east"
+    location            = " japaneast"
     resource_group_name = "akhilesh_RG_dev"
     sku_name            = "standard"
   }
