@@ -195,37 +195,3 @@ stages:
               workingDirectory: $(workingDirectory)
               environmentServiceNameAzureRM: $(serviceConnection)
               commandOptions: '-auto-approve'
-
-  # ==========================================
-  # STAGE 5: AUTO DESTROY ON FAILURE (CLEANUP)
-  # ==========================================
-  - stage: Auto_Cleanup_On_Failure
-    displayName: '5. Auto Destroy on Failure'
-    dependsOn: Terraform_Apply
-    condition: failed('Terraform_Apply')   # Sirf Apply fail hone par chalega
-    jobs:
-      - job: Destroy_Job
-        displayName: 'Rollback & Destroy Resources'
-        steps:
-          # Terraform Init
-          - task: TerraformTask@5
-            displayName: 'Terraform : Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: $(workingDirectory)
-              backendServiceArm: $(serviceConnection)
-              backendAzureRmResourceGroupName: $(resourceGroup)
-              backendAzureRmStorageAccountName: $(storageAccount)
-              backendAzureRmContainerName: $(containerName)
-              backendAzureRmKey: $(tfstateKey)
-
-          # Terraform Destroy
-          - task: TerraformTask@5
-            displayName: 'Terraform : Destroy (Rollback)'
-            inputs:
-              provider: 'azurerm'
-              command: 'destroy'
-              workingDirectory: $(workingDirectory)
-              environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '-auto-approve'
