@@ -1,15 +1,6 @@
-# 1. Trigger
-trigger:
-  branches:
-    include:
-      - main
-      - features/*
-
-# 2. Pool (यहाँ आपका Agent Pool जुड़ेगा)
-pool:
-  name: 'septakhilesh'
-
-# 3. Parameters
+# ========================================================
+# 1. PARAMETERS (यह सबसे ऊपर होना ज़रूरी है)
+# ========================================================
 parameters:
   - name: runTfSec
     displayName: "Run TfSec?"
@@ -31,6 +22,159 @@ parameters:
     type: boolean
     default: true
 
-# 4. Variables
+# ========================================================
+# 2. TRIGGER
+# ========================================================
+trigger:
+  branches:
+    include:
+      - main
+      - features/*
+
+# ========================================================
+# 3. POOL
+# ========================================================
+pool:
+  name: 'septakhilesh'
+
+# ========================================================
+# 4. VARIABLES
+# ========================================================
 variables:
   workingDirectory: 'environments/dev'
+
+# ========================================================
+# 5. STAGES (क्रमबद्ध स्टेजेस)
+# ========================================================
+stages:
+
+  # ------------------------------------------------------
+  # 1. TfSec Stage
+  # ------------------------------------------------------
+  - stage: TfSecStage
+    displayName: '1. TfSec Security Scan'
+    condition: ${{ eq(parameters.runTfSec, true) }}
+    jobs:
+      - job: tfsecJob
+        displayName: 'TfSec Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Running tfsec on: $(workingDirectory)"
+              tfsec $(workingDirectory)
+            displayName: 'Run TfSec Task'
+
+  # ------------------------------------------------------
+  # 2. TfLint Stage
+  # ------------------------------------------------------
+  - stage: TfLintStage
+    displayName: '2. TfLint Check'
+    dependsOn: TfSecStage
+    condition: and(in(dependencies.TfSecStage.result, 'Succeeded', 'Skipped'), ${{ eq(parameters.runTfLint, true) }})
+    jobs:
+      - job: tflintJob
+        displayName: 'TfLint Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Running tflint on: $(workingDirectory)"
+              cd $(workingDirectory)
+              tflint --init
+              tflint
+            displayName: 'Run TfLint Task'
+
+  # ------------------------------------------------------
+  # 3. Checkov Stage
+  # ------------------------------------------------------
+  - stage: CheckovStage
+    displayName: '3. Checkov Policy Scan'
+    dependsOn: TfLintStage
+    condition: and(in(dependencies.TfLintStage.result, 'Succeeded', 'Skipped'), ${{ eq(parameters.runCheckov, true) }})
+    jobs:
+      - job: checkovJob
+        displayName: 'Checkov Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Running Checkov on: $(workingDirectory)"
+              checkov -d $(workingDirectory) --framework terraform
+            displayName: 'Run Checkov Task'
+
+  # ------------------------------------------------------
+  # 4. Validate Stage
+  # ------------------------------------------------------
+  - stage: ValidateStage
+    displayName: '4. Terraform Validate & Fmt'
+    dependsOn: CheckovStage
+    condition: and(in(dependencies.CheckovStage.result, 'Succeeded', 'Skipped'), ${{ eq(parameters.runValidate, true) }})
+    jobs:
+      - job: validateJob
+        displayName: 'Validate Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Terraform Format & Validate in $(workingDirectory)"
+              cd $(workingDirectory)
+              terraform init
+              terraform fmt -check
+              terraform validate
+            displayName: 'Run Validate Task'
+
+  # ------------------------------------------------------
+  # 5. Plan Stage
+  # ------------------------------------------------------
+  - stage: PlanStage
+    displayName: '5. Terraform Plan'
+    dependsOn: ValidateStage
+    condition: in(dependencies.ValidateStage.result, 'Succeeded', 'Skipped')
+    jobs:
+      - job: planJob
+        displayName: 'Plan Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Terraform Plan in $(workingDirectory)"
+              cd $(workingDirectory)
+              terraform init
+              terraform plan -out=tfplan
+            displayName: 'Run Plan Task'
+
+  # ------------------------------------------------------
+  # 6. Manual Approval Stage
+  # ------------------------------------------------------
+  - stage: ManualApprovalStage
+    displayName: '6. Manual Approval'
+    dependsOn: PlanStage
+    condition: succeeded()
+    jobs:
+      - job: waitForApproval
+        displayName: 'Wait for Approval'
+        pool: server
+        timeoutInMinutes: 1440
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Manual Approval Task'
+            timeoutInMinutes: 1440
+            inputs:
+              notifyUsers: |
+                $(Build.RequestedForEmail)
+              instructions: 'Terraform Plan आउटपुट की समीक्षा करें और आगे अप्लाई करने के लिए Approve करें।'
+              onTimeout: 'reject'
+
+  # ------------------------------------------------------
+  # 7. Apply Stage
+  # ------------------------------------------------------
+  - stage: ApplyStage
+    displayName: '7. Terraform Apply'
+    dependsOn: ManualApprovalStage
+    condition: succeeded()
+    jobs:
+      - job: applyJob
+        displayName: 'Apply Job'
+        steps:
+          - checkout: self
+          - script: |
+              echo "==> Terraform Apply in $(workingDirectory)..."
+              cd $(workingDirectory)
+              terraform apply -auto-approve tfplan
+            displayName: 'Run Apply Task'
