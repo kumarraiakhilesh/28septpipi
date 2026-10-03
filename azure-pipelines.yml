@@ -1,5 +1,5 @@
 # ========================================================
-# TRIGGER (main और सभी features/* ब्रांचेस के लिए)
+# TRIGGER (main और features/* ब्रांचेस)
 # ========================================================
 trigger:
   branches:
@@ -8,13 +8,13 @@ trigger:
       - features/*
 
 # ========================================================
-# POOL (आपका Self-Hosted / Private Agent Pool)
+# POOL (आपका Private Agent Pool)
 # ========================================================
 pool:
   name: 'septakhilesh'
 
 # ========================================================
-# 1. PARAMETERS (UI में Run टाइम पर ऑन/ऑफ और सेलेक्ट करने के लिए)
+# 1. PARAMETERS (UI Switches)
 # ========================================================
 parameters:
   - name: Environment
@@ -47,13 +47,13 @@ parameters:
     default: true
 
 # ========================================================
-# 2. VARIABLES (सभी टूल्स और सेटिंग्स के वेरिएबल्स)
+# 2. VARIABLES
 # ========================================================
 variables:
-  # Environment Variable (Parameter से वैल्यू लेगा)
+  # Selected Environment
   selectedEnv: '${{ parameters.Environment }}'
 
-  # Docker & Azure Container Registry (ACR) Variables
+  # Docker & ACR Details
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
   imageRepository: 'my-microservice'
   tag: '$(Build.BuildId)'
@@ -76,19 +76,19 @@ variables:
 
   # Trivy Scan Variables
   trivySeverity: 'HIGH,CRITICAL'
-  trivyExitCode: '0'     # क्रिटिकल बग पर पाइपलाइन रोकनी हो तो '1' करें
-  trivyFormat: 'table'   # 'table' या 'json'
+  trivyExitCode: '0'
+  trivyFormat: 'table'
 
 # ========================================================
-# 3. STAGES
+# 3. STAGES (पूरी 8 Stages)
 # ========================================================
 stages:
 
   # ------------------------------------------------------
-  # Stage 1: SonarQube Stage (SAST Code Quality)
+  # Stage 1: SonarQube
   # ------------------------------------------------------
-  - stage: SonarQubeStage
-    displayName: 'SonarQube Stage'
+  - stage: SonarQube
+    displayName: 'SonarQube'
     condition: ${{ eq(parameters.RunSonarQube, true) }}
     jobs:
       - job: SonarQubeJob
@@ -96,20 +96,17 @@ stages:
         steps:
           - checkout: self
             displayName: 'Clone Code'
-
           - script: |
               echo "==> Running SonarQube Scan on pool: septakhilesh"
               echo "Project Key: $(sonarProjectKey)"
-              echo "Project Name: $(sonarProjectName)"
               echo "Host URL: $(sonarHostUrl)"
-              echo "Environment: $(selectedEnv)"
             displayName: 'SonarQube Task'
             env:
               SONAR_HOST_URL: $(sonarHostUrl)
               SONAR_PROJECT_KEY: $(sonarProjectKey)
 
   # ------------------------------------------------------
-  # Stage 2: Checkmarx Scan (SAST Security)
+  # Stage 2: Checkmarx Scan
   # ------------------------------------------------------
   - stage: CheckmarxScan
     displayName: 'Checkmarx Scan'
@@ -120,19 +117,16 @@ stages:
         steps:
           - checkout: self
             displayName: 'Clone Code'
-
           - script: |
               echo "==> Running Checkmarx SAST Scan"
-              echo "Service Connection: $(checkmarxServiceConnection)"
               echo "Preset: $(checkmarxPreset)"
-              echo "Target Source: $(Build.SourcesDirectory)"
             displayName: 'Checkmarx Scan Task'
 
   # ------------------------------------------------------
-  # Stage 3: Blackduck Scan (SCA / Open Source Scan)
+  # Stage 3: BlackDuck Scan
   # ------------------------------------------------------
   - stage: BlackduckScan
-    displayName: 'Blackduck Scan'
+    displayName: 'BlackDuck Scan'
     condition: ${{ eq(parameters.RunBlackduck, true) }}
     jobs:
       - job: BlackduckJob
@@ -140,52 +134,106 @@ stages:
         steps:
           - checkout: self
             displayName: 'Clone Code'
-
           - script: |
               echo "==> Running Blackduck Dependency Scan"
               echo "Project: $(blackduckProjectName)"
-              echo "Service Connection: $(blackduckServiceConnection)"
             displayName: 'Blackduck Scan Task'
 
   # ------------------------------------------------------
-  # Stage 4: Build and Push Stage (Docker Build)
+  # Stage 4: Build and Push (Space Error Fixed with Quotes)
   # ------------------------------------------------------
-  - stage: BuildAndPushStage
-    displayName: 'Build and Push Stage'
-    dependsOn: []
+  - stage: BuildAndPush
+    displayName: 'Build and Push'
+    dependsOn:
+      - SonarQube
+      - CheckmarxScan
+      - BlackduckScan
+    condition: |
+      and(
+        not(failed('SonarQube')),
+        not(failed('CheckmarxScan')),
+        not(failed('BlackduckScan'))
+      )
     jobs:
       - job: BuildAndPushJob
-        displayName: 'Build and Push job'
+        displayName: 'Build and Push Job'
         steps:
           - checkout: self
             displayName: 'Clone Code'
-
           - script: |
-              echo "==> Building Docker Image on pool: septakhilesh"
+              echo "==> Building Docker Image"
               echo "Image Full Path: $(containerRegistry)/$(imageRepository):$(tag)"
               echo "Dockerfile Path: $(dockerfilePath)"
-              docker build -f $(dockerfilePath) -t $(containerRegistry)/$(imageRepository):$(tag) .
-            displayName: 'Build and Push task'
+              docker build -f "$(dockerfilePath)" -t "$(containerRegistry)/$(imageRepository):$(tag)" .
+            displayName: 'Build and Push Task'
 
   # ------------------------------------------------------
-  # Stage 5: Trivy Scan (Container Vulnerability Scan)
+  # Stage 5: Trivy Scan
   # ------------------------------------------------------
   - stage: TrivyScan
     displayName: 'Trivy Scan'
-    dependsOn: BuildAndPushStage
+    dependsOn: BuildAndPush
     condition: and(succeeded(), ${{ eq(parameters.RunTrivy, true) }})
     jobs:
       - job: TrivyScanJob
-        displayName: 'Trivy Scan job'
+        displayName: 'Trivy Scan Job'
         steps:
           - script: |
               echo "==> Pulling Image for Scanning"
               echo "Target Image: $(containerRegistry)/$(imageRepository):$(tag)"
             displayName: 'Pull Image'
-
           - script: |
               echo "==> Running Trivy Container Scan"
-              echo "Severity Filter: $(trivySeverity)"
-              echo "Output Format: $(trivyFormat)"
-              trivy image --severity $(trivySeverity) --format $(trivyFormat) --exit-code $(trivyExitCode) $(containerRegistry)/$(imageRepository):$(tag)
-            displayName: 'Trivy Scan task'
+              trivy image --severity $(trivySeverity) --format $(trivyFormat) --exit-code $(trivyExitCode) "$(containerRegistry)/$(imageRepository):$(tag)"
+            displayName: 'Trivy Scan Task'
+
+  # ------------------------------------------------------
+  # Stage 6: Deploy to App - Dev
+  # ------------------------------------------------------
+  - stage: DeployToDev
+    displayName: 'Deploy to App - Dev'
+    dependsOn:
+      - BuildAndPush
+      - TrivyScan
+    condition: |
+      and(
+        succeeded('BuildAndPush'),
+        not(failed('TrivyScan'))
+      )
+    jobs:
+      - job: DeployDevJob
+        displayName: 'Deploy to Dev Job'
+        steps:
+          - script: echo "Deploying Docker image to Dev Environment..."
+            displayName: 'Deploy to Dev Task'
+
+  # ------------------------------------------------------
+  # Stage 7: Production Approval
+  # ------------------------------------------------------
+  - stage: ProductionApproval
+    displayName: 'Production Approval'
+    dependsOn: DeployToDev
+    condition: succeeded()
+    jobs:
+      - job: ApprovalJob
+        displayName: 'Manual Approval'
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 1440
+            inputs:
+              instructions: 'कृपया Dev की टेस्टिंग सत्यापित करें और Production में डिप्लॉयमेंट को Approve करें।'
+
+  # ------------------------------------------------------
+  # Stage 8: Deploy to App - Prod
+  # ------------------------------------------------------
+  - stage: DeployToProd
+    displayName: 'Deploy to App - Prod'
+    dependsOn: ProductionApproval
+    condition: succeeded()
+    jobs:
+      - job: DeployProdJob
+        displayName: 'Deploy to Prod Job'
+        steps:
+          - script: echo "Deploying Docker image to Production Environment..."
+            displayName: 'Deploy to Prod Task'
