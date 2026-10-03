@@ -1,231 +1,191 @@
+# ========================================================
+# TRIGGER (main और सभी features/* ब्रांचेस के लिए)
+# ========================================================
 trigger:
   branches:
     include:
       - main
       - features/*
 
+# ========================================================
+# POOL (आपका Self-Hosted / Private Agent Pool)
+# ========================================================
 pool:
-  name: septakhilesh
+  name: 'septakhilesh'
 
+# ========================================================
+# 1. PARAMETERS (UI में Run टाइम पर ऑन/ऑफ और सेलेक्ट करने के लिए)
+# ========================================================
+parameters:
+  - name: Environment
+    displayName: "Select Target Environment"
+    type: string
+    default: "dev"
+    values:
+      - "dev"
+      - "qa"
+      - "prod"
+
+  - name: RunSonarQube
+    displayName: "Run SonarQube Scan?"
+    type: boolean
+    default: true
+
+  - name: RunCheckmarx
+    displayName: "Run Checkmarx Scan?"
+    type: boolean
+    default: false
+
+  - name: RunBlackduck
+    displayName: "Run Blackduck Scan?"
+    type: boolean
+    default: false
+
+  - name: RunTrivy
+    displayName: "Run Trivy Container Scan?"
+    type: boolean
+    default: true
+
+# ========================================================
+# 2. VARIABLES (सभी टूल्स और सेटिंग्स के वेरिएबल्स)
+# ========================================================
 variables:
-  workingDirectory: '$(System.DefaultWorkingDirectory)'
-  serviceConnection: 'sept28service'
-  resourceGroup: 'akhileshtestpip'
-  storageAccount: 'akhileshstoragepipi2'
-  containerName: 'akhileshcanttest'
-  tfstateKey: 'pipe.tfstate'
+  # Environment Variable (Parameter से वैल्यू लेगा)
+  selectedEnv: '${{ parameters.Environment }}'
 
+  # Docker & Azure Container Registry (ACR) Variables
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  imageRepository: 'my-microservice'
+  tag: '$(Build.BuildId)'
+  containerRegistry: 'myacrregistry.azurecr.io'
+  dockerRegistryServiceConnection: 'My-ACR-ServiceConnection'
+
+  # SonarQube Variables
+  sonarServiceConnection: 'My-SonarQube-Connection'
+  sonarHostUrl: 'https://sonarcloud.io'
+  sonarProjectKey: 'my-microservice-$(selectedEnv)'
+  sonarProjectName: 'My-Microservice-$(selectedEnv)'
+
+  # Checkmarx Variables
+  checkmarxServiceConnection: 'My-Checkmarx-Connection'
+  checkmarxPreset: 'Checkmarx Default'
+
+  # Blackduck Variables
+  blackduckServiceConnection: 'My-Blackduck-Connection'
+  blackduckProjectName: 'my-microservice'
+
+  # Trivy Scan Variables
+  trivySeverity: 'HIGH,CRITICAL'
+  trivyExitCode: '0'     # क्रिटिकल बग पर पाइपलाइन रोकनी हो तो '1' करें
+  trivyFormat: 'table'   # 'table' या 'json'
+
+# ========================================================
+# 3. STAGES
+# ========================================================
 stages:
-  # ==========================================
-  # STAGE 1: INIT, SECURITY SCAN & VALIDATE
-  # ==========================================
-  - stage: Init_And_Security
-    displayName: '1. Init & Security Scan'
+
+  # ------------------------------------------------------
+  # Stage 1: SonarQube Stage (SAST Code Quality)
+  # ------------------------------------------------------
+  - stage: SonarQubeStage
+    displayName: 'SonarQube Stage'
+    condition: ${{ eq(parameters.RunSonarQube, true) }}
     jobs:
-      - job: Init_And_Scan_Job
-        displayName: 'Init, Security Scans & Validate'
+      - job: SonarQubeJob
+        displayName: 'SonarQube Job'
         steps:
-          # Terraform Init
-          - task: TerraformTask@5
-            displayName: 'Terraform : Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: $(workingDirectory)
-              backendServiceArm: $(serviceConnection)
-              backendAzureRmResourceGroupName: $(resourceGroup)
-              backendAzureRmStorageAccountName: $(storageAccount)
-              backendAzureRmContainerName: $(containerName)
-              backendAzureRmKey: $(tfstateKey)
+          - checkout: self
+            displayName: 'Clone Code'
 
-          # TFLint Scan
-          - powershell: |
-              Write-Host "===> Running TFLint..."
-              tflint --init
-              tflint --minimum-failure-severity=error
-              exit 0
-            displayName: 'Run TFLint'
-            workingDirectory: $(workingDirectory)
+          - script: |
+              echo "==> Running SonarQube Scan on pool: septakhilesh"
+              echo "Project Key: $(sonarProjectKey)"
+              echo "Project Name: $(sonarProjectName)"
+              echo "Host URL: $(sonarHostUrl)"
+              echo "Environment: $(selectedEnv)"
+            displayName: 'SonarQube Task'
+            env:
+              SONAR_HOST_URL: $(sonarHostUrl)
+              SONAR_PROJECT_KEY: $(sonarProjectKey)
 
-          # TFSec Scan
-          - powershell: |
-              Write-Host "===> Running TFSec..."
-              tfsec .
-              exit 0
-            displayName: 'Run TFSec'
-            workingDirectory: $(workingDirectory)
-
-          # Checkov Scan
-          - powershell: |
-              Write-Host "===> Running Checkov..."
-              checkov -d . --framework terraform --soft-fail
-              exit 0
-            displayName: 'Run Checkov Scan'
-            workingDirectory: $(workingDirectory)
-
-          # Terraform Validate
-          - task: TerraformTask@5
-            displayName: 'Terraform : Validate'
-            inputs:
-              provider: 'azurerm'
-              command: 'validate'
-              workingDirectory: $(workingDirectory)
-
-  # ==========================================
-  # STAGE 2: TERRAFORM PLAN
-  # ==========================================
-  - stage: Terraform_Plan
-    displayName: '2. Terraform Plan'
-    dependsOn: Init_And_Security
-    condition: succeeded('Init_And_Security')
+  # ------------------------------------------------------
+  # Stage 2: Checkmarx Scan (SAST Security)
+  # ------------------------------------------------------
+  - stage: CheckmarxScan
+    displayName: 'Checkmarx Scan'
+    condition: ${{ eq(parameters.RunCheckmarx, true) }}
     jobs:
-      - job: Plan_Job
-        displayName: 'Terraform Plan'
+      - job: CheckmarxJob
+        displayName: 'Checkmarx Scan Job'
         steps:
-          # Terraform Init
-          - task: TerraformTask@5
-            displayName: 'Terraform : Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: $(workingDirectory)
-              backendServiceArm: $(serviceConnection)
-              backendAzureRmResourceGroupName: $(resourceGroup)
-              backendAzureRmStorageAccountName: $(storageAccount)
-              backendAzureRmContainerName: $(containerName)
-              backendAzureRmKey: $(tfstateKey)
+          - checkout: self
+            displayName: 'Clone Code'
 
-          # Terraform Plan
-          - task: TerraformTask@5
-            displayName: 'Terraform : Plan'
-            inputs:
-              provider: 'azurerm'
-              command: 'plan'
-              workingDirectory: $(workingDirectory)
-              environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '-out=tfplan'
+          - script: |
+              echo "==> Running Checkmarx SAST Scan"
+              echo "Service Connection: $(checkmarxServiceConnection)"
+              echo "Preset: $(checkmarxPreset)"
+              echo "Target Source: $(Build.SourcesDirectory)"
+            displayName: 'Checkmarx Scan Task'
 
-          # Publish Plan as Artifact
-          - task: PublishBuildArtifacts@1
-            displayName: 'Publish Plan Artifact'
-            inputs:
-              PathtoPublish: '$(workingDirectory)/tfplan'
-              ArtifactName: 'terraform-plan'
-              publishLocation: 'Container'
-
-  # =======================================================================
-  # STAGE 3: AI AGENT PLAN REVIEW & MANUAL APPROVAL (AFTER PLAN)
-  # =======================================================================
-  - stage: AI_And_Manual_Approval_After_Plan
-    displayName: '3. AI Review & Human Approval'
-    dependsOn: Terraform_Plan
-    condition: succeeded('Terraform_Plan')
+  # ------------------------------------------------------
+  # Stage 3: Blackduck Scan (SCA / Open Source Scan)
+  # ------------------------------------------------------
+  - stage: BlackduckScan
+    displayName: 'Blackduck Scan'
+    condition: ${{ eq(parameters.RunBlackduck, true) }}
     jobs:
-      # Step A: 🤖 AI Agent Reviews the Generated Plan
-      - job: AI_Plan_Review_Job
-        displayName: '🤖 AI Agent Plan Review'
+      - job: BlackduckJob
+        displayName: 'Blackduck Scan Job'
         steps:
-          - powershell: |
-              Write-Host "====================================================="
-              Write-Host "🤖 AI AGENT: Analyzing Terraform Plan Output..."
-              Write-Host "====================================================="
-              Write-Host "-> Inspecting planned resource creations, changes & deletions..."
-              Write-Host "-> Checking for critical deletions (Data Loss Prevention)..."
-              Write-Host "-> Evaluating estimated cost impact and security compliance..."
-              
-              # Simulated AI Decision on Plan
-              $DangerousDestruction = $false
-              if (-not $DangerousDestruction) {
-                  Write-Host "-----------------------------------------------------"
-                  Write-Host "✅ AI AGENT DECISION: PLAN APPROVED"
-                  Write-Host "Summary: No destructive deletions or policy violations detected."
-                  Write-Host "Recommendation: Safe to proceed with Terraform Apply."
-                  Write-Host "-----------------------------------------------------"
-                  exit 0
-              } else {
-                  Write-Error "❌ AI AGENT DECISION: REJECTED - Risky destructions found in plan."
-                  exit 1
-              }
-            displayName: 'AI Agent Evaluates Plan'
-            workingDirectory: $(workingDirectory)
+          - checkout: self
+            displayName: 'Clone Code'
 
-      # Step B: 👤 Human Approver Gate (After AI Review passes)
-      - job: Manual_Approval_Job
-        displayName: '👤 Manual Approver'
-        dependsOn: AI_Plan_Review_Job
-        pool: server # Agentless job for human approval
-        steps:
-          - task: ManualValidation@0
-            displayName: 'Wait for Human Approval'
-            timeoutInMinutes: 1440 # 24 hours wait time
-            inputs:
-              notifyUsers: 'approver@example.com' # Yahan apni email ID daal sakte hain
-              instructions: 'AI Agent ne Terraform Plan ko review karke APPROVE kar diya hai. Kripya check karein aur Apply chalane ke liye "Resume" par click karein.'
+          - script: |
+              echo "==> Running Blackduck Dependency Scan"
+              echo "Project: $(blackduckProjectName)"
+              echo "Service Connection: $(blackduckServiceConnection)"
+            displayName: 'Blackduck Scan Task'
 
-  # ==========================================
-  # STAGE 4: TERRAFORM APPLY
-  # ==========================================
-  - stage: Terraform_Apply
-    displayName: '4. Terraform Apply'
-    dependsOn: AI_And_Manual_Approval_After_Plan
-    condition: succeeded('AI_And_Manual_Approval_After_Plan')
+  # ------------------------------------------------------
+  # Stage 4: Build and Push Stage (Docker Build)
+  # ------------------------------------------------------
+  - stage: BuildAndPushStage
+    displayName: 'Build and Push Stage'
+    dependsOn: []
     jobs:
-      - job: Apply_Job
-        displayName: 'Terraform Apply'
+      - job: BuildAndPushJob
+        displayName: 'Build and Push job'
         steps:
-          # Terraform Init
-          - task: TerraformTask@5
-            displayName: 'Terraform : Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: $(workingDirectory)
-              backendServiceArm: $(serviceConnection)
-              backendAzureRmResourceGroupName: $(resourceGroup)
-              backendAzureRmStorageAccountName: $(storageAccount)
-              backendAzureRmContainerName: $(containerName)
-              backendAzureRmKey: $(tfstateKey)
+          - checkout: self
+            displayName: 'Clone Code'
 
-          # Terraform Apply
-          - task: TerraformTask@5
-            displayName: 'Terraform : Apply'
-            inputs:
-              provider: 'azurerm'
-              command: 'apply'
-              workingDirectory: $(workingDirectory)
-              environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '-auto-approve'
+          - script: |
+              echo "==> Building Docker Image on pool: septakhilesh"
+              echo "Image Full Path: $(containerRegistry)/$(imageRepository):$(tag)"
+              echo "Dockerfile Path: $(dockerfilePath)"
+              docker build -f $(dockerfilePath) -t $(containerRegistry)/$(imageRepository):$(tag) .
+            displayName: 'Build and Push task'
 
-  # ==========================================
-  # STAGE 5: AUTO DESTROY ON FAILURE (CLEANUP)
-  # ==========================================
-  - stage: Auto_Cleanup_On_Failure
-    displayName: '5. Auto Destroy on Failure'
-    dependsOn: Terraform_Apply
-    condition: failed('Terraform_Apply')   # Sirf Apply fail hone par chalega
+  # ------------------------------------------------------
+  # Stage 5: Trivy Scan (Container Vulnerability Scan)
+  # ------------------------------------------------------
+  - stage: TrivyScan
+    displayName: 'Trivy Scan'
+    dependsOn: BuildAndPushStage
+    condition: and(succeeded(), ${{ eq(parameters.RunTrivy, true) }})
     jobs:
-      - job: Destroy_Job
-        displayName: 'Rollback & Destroy Resources'
+      - job: TrivyScanJob
+        displayName: 'Trivy Scan job'
         steps:
-          # Terraform Init
-          - task: TerraformTask@5
-            displayName: 'Terraform : Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: $(workingDirectory)
-              backendServiceArm: $(serviceConnection)
-              backendAzureRmResourceGroupName: $(resourceGroup)
-              backendAzureRmStorageAccountName: $(storageAccount)
-              backendAzureRmContainerName: $(containerName)
-              backendAzureRmKey: $(tfstateKey)
+          - script: |
+              echo "==> Pulling Image for Scanning"
+              echo "Target Image: $(containerRegistry)/$(imageRepository):$(tag)"
+            displayName: 'Pull Image'
 
-          # Terraform Destroy
-          - task: TerraformTask@5
-            displayName: 'Terraform : Destroy (Rollback)'
-            inputs:
-              provider: 'azurerm'
-              command: 'destroy'
-              workingDirectory: $(workingDirectory)
-              environmentServiceNameAzureRM: $(serviceConnection)
-              commandOptions: '-auto-approve'
+          - script: |
+              echo "==> Running Trivy Container Scan"
+              echo "Severity Filter: $(trivySeverity)"
+              echo "Output Format: $(trivyFormat)"
+              trivy image --severity $(trivySeverity) --format $(trivyFormat) --exit-code $(trivyExitCode) $(containerRegistry)/$(imageRepository):$(tag)
+            displayName: 'Trivy Scan task'
